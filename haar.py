@@ -89,11 +89,3 @@ def bipolar(img):
   out[:,:,2] = np.where(img > 0, a + b * np.power(img / (img.max() + 0.001), c), 0)
   return from_float(out)
 
-def load(fn):
-  return Image.open(fn).convert('RGB').split()
-
-def save(fn, r, g, b):
-  assert r.dtype == np.uint8
-  Image.merge('RGB', (Image.fromarray(r), Image.fromarray(g), Image.fromarray(b))).save(fn)
-  print 'wrote', fn
-
