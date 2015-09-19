@@ -63,7 +63,7 @@ def to_float(img, gamma=2.2):
   """
   Convert uint8 image to linear floating point values.
   """
-  return np.power(img.astype(float) / 255, gamma)
+  return np.power(np.asarray(img).astype(float) / 255, gamma)
 
 def from_float(img, gamma=2.2):
   """
@@ -90,10 +90,10 @@ def bipolar(img):
   return from_float(out)
 
 def load(fn):
-  return np.asarray(Image.open(fn).convert(mode='L'))
+  return Image.open(fn).convert('RGB').split()
 
-def save(fn, img):
-  assert img.dtype == np.uint8
-  Image.fromarray(img).save(fn)
+def save(fn, r, g, b):
+  assert r.dtype == np.uint8
+  Image.merge('RGB', (Image.fromarray(r), Image.fromarray(g), Image.fromarray(b))).save(fn)
   print 'wrote', fn
 
