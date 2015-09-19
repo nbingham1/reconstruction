@@ -2,17 +2,12 @@ import ssearch
 import numpy
 import caffe
 import haar
+import random
+from paint import *
 from PIL import Image
 from PIL import ImageFilter
-
+from pylab import scatter
 from google.protobuf import text_format
-
-
-def load(path):
-    return Image.open(path).convert('RGB')
-
-def display(img):
-    img.show()
 
 layer='plot'
 
@@ -171,7 +166,7 @@ def compress(img, ratio):
 #    a dictionary of { rect => [confidence] }
 #    where rect is (x,y,w,h)
 #    and confidence is a float describing the confidence of that description
-def reconstruct(img, confidence, count, step_size=0.5):
+def reconstruct_backprop(img, confidence, count, step_size=0.5):
     caffe_root = '../caffe-master/'
 
     model_path = caffe_root + 'models/bvlc_googlenet/' # substitute your path here
@@ -210,23 +205,95 @@ def reconstruct(img, confidence, count, step_size=0.5):
     def reconstruct_step(img, step_size=0.5):
         net.blobs['data'].data[0] = img
         net.forward(end=layer)
-	net.blobs[layer].diff[0] = confidence - net.blobs[layer].data[0]
-	net.backward(start=layer)
-	return numpy.clip(img + step_size * net.blobs['data'].diff[0] / numpy.abs(net.blobs['data'].diff[0]).mean(), -100.0, 100.0)
+        net.blobs[layer].diff[0] = confidence - net.blobs[layer].data[0]
+        net.backward(start=layer)
+        return numpy.clip(img + step_size * net.blobs['data'].diff[0] / numpy.abs(net.blobs['data'].diff[0]).mean(), -100.0, 100.0)
 
     working_img = preprocess(img)
     print(working_img)
 
     for i in xrange(count):
         working_img = reconstruct_step(working_img, step_size)
-	display(deprocess(working_img))
-
-    #net.blobs['data'].data[0] = working_img
-    #net.forward(end='prob')
-    #net.blobs['prob'].diff[0] = confidence - net.blobs['prob'].data[0]
-    #bottom = net.backward(start='prob')
+        display(deprocess(working_img))
 
     return deprocess(working_img)
+
+def reconstruct_anneal(img, confidence, count, step_size=0.5):
+    (w,h,d) = img.shape
+    
+    caffe_root = '../caffe-master/'
+
+    model_path = caffe_root + 'models/bvlc_googlenet/' # substitute your path here
+    net_fn   = model_path + 'deploy.prototxt'
+    param_fn = model_path + 'bvlc_googlenet.caffemodel'
+
+    model = caffe.io.caffe_pb2.NetParameter()
+    text_format.Merge(open(net_fn).read(), model)
+    model.force_backward = True
+    open('tmp.prototxt', 'w').write(str(model))
+
+    net = caffe.Net('tmp.prototxt',
+                    param_fn,
+                    caffe.TEST)
+
+    transformer = caffe.io.Transformer({'data': net.blobs['data'].data.shape})
+    transformer.set_transpose('data', (2,0,1))
+    
+    # mean pixel
+    transformer.set_mean('data', numpy.load(caffe_root + 'python/caffe/imagenet/ilsvrc_2012_mean.npy').mean(1).mean(1))
+
+    # the reference model operates on images in [0,255] range instead of [0,1]
+    transformer.set_raw_scale('data', 255)
+   
+    # the reference model has channels in BGR order instead of RGB
+    transformer.set_channel_swap('data', (2,1,0))
+
+    # set net to batch size of 50
+    net.blobs['data'].reshape(50, 3, 224, 224)
+
+    def preprocess(in_img):
+        return transformer.preprocess('data', numpy.float32(numpy.asarray(in_img))/255.0)
+    def deprocess(in_img):
+        return Image.fromarray(numpy.uint8(transformer.deprocess('data', in_img)*255.0))
+
+    brush_width_s = 224
+    brush_stength_s = 20
+    last_best_improve = 0
+    temp = 1.0
+    step_size = 10
+        
+    def reconstruct_step(img, temp):
+        # Apply image to input of network
+        net.blobs['data'].data[0] = img
+        # Run network forward
+        net.forward(end=layer)
+        # Update brush
+        brush_width = brush_width_s * temp
+        brush_strength = brush_strength_s * temp
+        # Apply brush
+        out_img = brush_stroke(img,brush_width,brush_strength)
+        # Calculate if brush improved image
+        #out_img = numpy.clip(img + step_size * net.blobs['data'].diff[0] / numpy.abs(net.blobs['data'].diff[0]).mean(), -100.0, 100.0)        
+        # Update temperature
+        # ????
+        return out_img, improv
+
+
+    working_img = preprocess(img)
+    print(working_img)
+
+    # Begin greedy simulated annealing with solid texture
+    while temp > 0:
+        working_img = reconstruct_step(working_img, temp)
+        display(deprocess(working_img))
+
+#    # Begin greedy simulate annealing with fuzzy texture
+#    while temp > 0:
+#        working_img = reconstruct_step(working_img, temp)
+#        display(deprocess(working_img))
+
+    return deprocess(working_img)
+
 
 # test for select
 #img = load('data/cat.jpg')
@@ -264,6 +331,7 @@ def reconstruct(img, confidence, count, step_size=0.5):
 
 #print label(img)
 
+'''
 # test for reconstruct
 img = load('data/cat.jpg')
 display(img)
@@ -275,3 +343,4 @@ display(shitty)
 
 rebuilt = reconstruct(shitty, confidence, 20, 5.0)
 display(rebuilt)
+'''
