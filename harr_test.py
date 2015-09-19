@@ -1,10 +1,10 @@
-import harr
+from harr import *
 import Image
 import numpy as np
 
 img = to_float(load('cat-original.png'))
 coeffs = haar_2d(img)
-strong_coeffs = keep_ratio(coeffs, .05)
+strong_coeffs = keep_ratio(coeffs, .0025)
 lossy = ihaar_2d(strong_coeffs)
 
 save('cat-coeff.png', bipolar(coeffs))
