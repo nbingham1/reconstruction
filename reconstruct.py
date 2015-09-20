@@ -8,8 +8,10 @@ from PIL import Image
 from PIL import ImageFilter
 from pylab import scatter
 from google.protobuf import text_format
+import scipy
 
-layer='plot'
+#layer='inception_3b/5x5_reduce'
+layer='prob'
 
 # select
 #
@@ -205,7 +207,9 @@ def reconstruct_backprop(img, confidence, count, step_size=0.5):
     def reconstruct_step(img, step_size=0.5):
         net.blobs['data'].data[0] = img
         net.forward(end=layer)
-        net.blobs[layer].diff[0] = confidence - net.blobs[layer].data[0]
+        index = confidence.argsort()[0]
+        net.blobs[layer].diff[0][index] = confidence[index] - net.blobs[layer].data[0][index]
+        #net.blobs[layer].diff[0] = confidence - net.blobs[layer].data[0]
         net.backward(start=layer)
         return numpy.clip(img + step_size * net.blobs['data'].diff[0] / numpy.abs(net.blobs['data'].diff[0]).mean(), -100.0, 100.0)
 
@@ -214,13 +218,12 @@ def reconstruct_backprop(img, confidence, count, step_size=0.5):
 
     for i in xrange(count):
         working_img = reconstruct_step(working_img, step_size)
-        display(deprocess(working_img))
+        tmp_img = deprocess(working_img).copy()
+        display(tmp_img)
 
     return deprocess(working_img)
 
 def reconstruct_anneal(img, confidence, count, step_size=0.5):
-    (w,h,d) = img.shape
-    
     caffe_root = '../caffe-master/'
 
     model_path = caffe_root + 'models/bvlc_googlenet/' # substitute your path here
@@ -256,41 +259,63 @@ def reconstruct_anneal(img, confidence, count, step_size=0.5):
     def deprocess(in_img):
         return Image.fromarray(numpy.uint8(transformer.deprocess('data', in_img)*255.0))
 
-    brush_width_s = 224
-    brush_stength_s = 20
-    last_best_improve = 0
-    temp = 1.0
+    brush_width_s = 100
+    brush_strength_s = 10
+    temp = 0.05
     step_size = 10
-        
-    def reconstruct_step(img, temp):
-        # Apply image to input of network
-        net.blobs['data'].data[0] = img
-        # Run network forward
-        net.forward(end=layer)
-        # Update brush
-        brush_width = brush_width_s * temp
-        brush_strength = brush_strength_s * temp
-        # Apply brush
-        out_img = brush_stroke(img,brush_width,brush_strength)
-        # Calculate if brush improved image
-        #out_img = numpy.clip(img + step_size * net.blobs['data'].diff[0] / numpy.abs(net.blobs['data'].diff[0]).mean(), -100.0, 100.0)        
-        # Update temperature
-        # ????
-        return out_img, improv
-
+    image_dist = 0
 
     working_img = preprocess(img)
     print(working_img)
 
-    # Begin greedy simulated annealing with solid texture
-    while temp > 0:
-        working_img = reconstruct_step(working_img, temp)
-        display(deprocess(working_img))
+    # Apply image to input of network
+    net.blobs['data'].data[0] = working_img
+    # Run network forward
+    net.forward(end=layer)
+    image_dist = scipy.spatial.distance.cosine(net.blobs['prob'].data[0], confidence)
 
-#    # Begin greedy simulate annealing with fuzzy texture
-#    while temp > 0:
-#        working_img = reconstruct_step(working_img, temp)
-#        display(deprocess(working_img))
+    (d,w,h) = working_img.shape
+    # Begin greedy simulated annealing with solid texture
+    while temp < 1.0:
+        # Update brush
+        brush_width = int(brush_width_s * temp)
+        brush_strength = brush_strength_s / temp
+        # Apply brush
+        brushed_img = brush_stroke(working_img,brush_width,brush_strength)
+        #brushed_img = working_img.copy()
+        #for n in xrange(int(temp*1000.0)):
+        #    (i,j,k) = (random.randint(0,w-1), random.randint(0,h-1), random.randint(0,d-1))
+        #    brushed_img[k][i][j] = numpy.clip(brushed_img[k][i][j] + random.randint(-int(temp*30.0), int(temp*30.0)), -110.0, 110.0)
+
+        #brushed_img = working_img.copy()
+        #length = 0
+        #for i in xrange(w):
+        #    for j in xrange(h):
+        #        for k in xrange(d):
+        #            brushed_img[k][i][j] = numpy.clip(brushed_img[k][i][j] + random.randint(-int(temp*30.0), int(temp*30.0)), -110.0, 110.0)
+        #            length += (brushed_img[k][i][j] + 128.0)*(brushed_img[k][i][j] + 128.0)/(256.0*256.0)
+        #length = numpy.sqrt(length)
+        #for i in xrange(w):
+        #    for j in xrange(h):
+        #        for k in xrange(d):
+        #            brushed_img[k][i][j] /= length
+        
+        # Apply image to input of network
+        net.blobs['data'].data[0] = brushed_img
+        # Run network forward
+        net.forward(end=layer)
+        # Calculate if brush improved image (distance)
+        new_image_dist = scipy.spatial.distance.cosine(net.blobs['prob'].data[0], confidence)
+        # Update image if it has been improved
+        if new_image_dist < image_dist:
+            image_dist = new_image_dist
+            working_img = brushed_img
+            display(deprocess(working_img))
+            if temp > 0.05:
+                temp -= 0.05
+        else:
+            temp += 0.05
+        print temp
 
     return deprocess(working_img)
 
@@ -331,7 +356,7 @@ def reconstruct_anneal(img, confidence, count, step_size=0.5):
 
 #print label(img)
 
-'''
+
 # test for reconstruct
 img = load('data/cat.jpg')
 display(img)
@@ -341,6 +366,6 @@ shitty = compress(img, 0.001)
 shitty = shitty.filter(ImageFilter.BLUR)
 display(shitty)
 
-rebuilt = reconstruct(shitty, confidence, 20, 5.0)
+rebuilt = reconstruct_anneal(shitty, confidence, 20, 5.0)
 display(rebuilt)
-'''
+
